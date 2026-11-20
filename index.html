@@ -1,31 +1,172 @@
 <!DOCTYPE html>
-<!-- A placeholder from the Home Sales template. Replace this file with your site's first page. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Under construction</title>
+  <title>Median sale price by city</title>
   <!-- An empty icon, so the browser doesn't log an error looking for favicon.ico -->
   <link rel="icon" href="data:,">
   <style>
-    :root { color-scheme: light dark; }
+    /* Colour roles from the dataviz reference palette: blue for the single series,
+       light and dark steps, with neutral surfaces and text tokens. */
+    :root {
+      color-scheme: light dark;
+      --page: #f9f9f7;
+      --surface-1: #fcfcfb;
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --series-1: #2a78d6;
+      --gridline: #e1e0d9;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --page: #0d0d0d;
+        --surface-1: #1a1a19;
+        --text-primary: #f0efec;
+        --text-secondary: #c3c2b7;
+        --text-muted: #898781;
+        --series-1: #3987e5;
+        --gridline: #2c2c2a;
+      }
+    }
+    :root[data-theme="dark"] {
+      --page: #0d0d0d;
+      --surface-1: #1a1a19;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --series-1: #3987e5;
+      --gridline: #2c2c2a;
+    }
     body {
       max-width: 40rem;
       margin: 0 auto;
       padding: 3rem 1rem;
-      font-family: system-ui, sans-serif;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
       line-height: 1.5;
+      background: var(--page);
+      color: var(--text-primary);
     }
-    footer { margin-top: 3rem; font-size: 0.875rem; opacity: 0.75; }
+    h1 { font-size: 1.75rem; margin: 0 0 0.5rem; }
+    .lede { margin: 0 0 2rem; color: var(--text-secondary); }
+
+    .chart { background: var(--surface-1); border: 1px solid rgba(11, 11, 11, 0.10); border-radius: 0.5rem; padding: 1.25rem 1rem; }
+    .chart h2 { font-size: 1.125rem; margin: 0; }
+    .chart .subtitle { margin: 0.25rem 0 1rem; font-size: 0.875rem; color: var(--text-secondary); }
+    .chart-status { color: var(--text-secondary); }
+
+    .bars { list-style: none; margin: 0; padding: 0; }
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(7.5rem, 11rem) 1fr;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.3rem 0;
+      border-top: 1px solid var(--gridline);
+    }
+    .bar-row:first-child { border-top: 0; }
+    @media (max-width: 30rem) {
+      /* Phone: name above its bar, so the bar gets the full width */
+      .bar-row { grid-template-columns: 1fr; gap: 0.25rem; }
+    }
+    .bar-name { font-size: 0.875rem; color: var(--text-primary); }
+    .bar-name small { display: block; color: var(--text-muted); font-size: 0.75rem; }
+    .bar-track { position: relative; height: 1.25rem; }
+    .bar-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      background: var(--series-1);
+      border-radius: 0 4px 4px 0; /* 4px rounded data end, square at the baseline */
+    }
+    .bar-value {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      font-size: 0.875rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--text-primary);
+    }
+
+    .chart-note { margin: 1rem 0 0; font-size: 0.8125rem; color: var(--text-secondary); }
+    footer { margin-top: 3rem; font-size: 0.875rem; color: var(--text-muted); }
   </style>
 </head>
 <body>
   <main>
-    <h1>This site is under construction</h1>
-    <p>It will show findings from the College-town home sales dataset.</p>
+    <h1>College-town home sales</h1>
+    <p class="lede">Median sale price in each of the 18 cities and towns in the dataset.</p>
+
+    <figure class="chart" aria-labelledby="chart-title">
+      <h2 id="chart-title">Median sale price by city</h2>
+      <p class="subtitle">Sales of $10,000 or more. Sales under $10,000 are left out.</p>
+      <p class="chart-status" id="chart-status" role="status">Loading the chart…</p>
+      <ol class="bars" id="bars" hidden></ol>
+      <p class="chart-note" id="chart-note" hidden></p>
+    </figure>
   </main>
   <footer>
     <p>Data: College-town home sales dataset, version 1.0 (2026). University of Illinois-Deloitte Foundation Center for Business Emerging Technologies. Data collected March 2026.</p>
   </footer>
+
+  <script>
+    (async function () {
+      var status = document.getElementById('chart-status');
+      var list = document.getElementById('bars');
+      var note = document.getElementById('chart-note');
+      var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+      var int = new Intl.NumberFormat('en-US');
+      try {
+        // Relative path: GitHub Pages serves the site from a subfolder.
+        var response = await fetch('data/city_median_sale_price.json');
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var data = await response.json();
+
+        // Bars are scaled to the largest median, with the longest bar at 62% of the
+        // track so the value label fits to its right on a phone.
+        var largest = Math.max.apply(null, data.cities.map(function (c) { return c.median_sale_price; }));
+        data.cities.forEach(function (c) {
+          var row = document.createElement('li');
+          row.className = 'bar-row';
+
+          var name = document.createElement('span');
+          name.className = 'bar-name';
+          name.textContent = c.city + ', ' + c.state;
+          var sales = document.createElement('small');
+          sales.textContent = int.format(c.sales) + ' sales';
+          name.appendChild(sales);
+
+          var track = document.createElement('span');
+          track.className = 'bar-track';
+          var width = (c.median_sale_price / largest * 62).toFixed(2) + '%';
+          var fill = document.createElement('span');
+          fill.className = 'bar-fill';
+          fill.style.width = width;
+          var value = document.createElement('span');
+          value.className = 'bar-value';
+          value.style.left = 'calc(' + width + ' + 0.5rem)';
+          value.textContent = usd.format(Math.round(c.median_sale_price));
+          track.appendChild(fill);
+          track.appendChild(value);
+
+          row.appendChild(name);
+          row.appendChild(track);
+          list.appendChild(row);
+        });
+
+        status.hidden = true;
+        list.hidden = false;
+        note.textContent = 'Left out: ' + int.format(data.rows_excluded_under_minimum) +
+          ' sales under $10,000, of ' + int.format(data.total_rows) + ' rows. ' +
+          'Medians are computed by scripts/city_median_sale_price.py from data/college_town_home_sales.csv.';
+        note.hidden = false;
+      } catch (error) {
+        status.textContent = 'The chart data could not be loaded (' + error.message + ').';
+      }
+    })();
+  </script>
 </body>
 </html>
